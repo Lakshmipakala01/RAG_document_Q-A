@@ -93,51 +93,132 @@ st.session_state.setdefault("store", None)
 st.session_state.setdefault("messages", [])
 st.session_state.setdefault("indexed_info", "")
 
+
 # ---------- Sidebar ----------
 with st.sidebar:
     st.header("Settings")
 
-    provider = st.radio("LLM provider", ["Groq", "Ollama (local)"])
+    # Select LLM provider
+    provider = st.radio(
+        "LLM provider",
+        ["Groq", "Ollama (local)"]
+    )
+
     provider_key = "Groq" if provider == "Groq" else "Ollama"
 
+    # ---------- Groq Settings ----------
     if provider_key == "Groq":
-        model = st.selectbox("Model", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"])
-        groq_key = st.text_input(
-            "Groq API key", type="password", value=os.getenv("GROQ_API_KEY", "")
+        model = st.selectbox(
+            "Groq model",
+            options=[
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+            ],
+            index=0,
         )
+
+        # Read API key from Streamlit Cloud Secrets or environment
+        try:
+            groq_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
+        except Exception:
+            groq_key = os.getenv("GROQ_API_KEY", "")
+
+        # Allow manual entry if no key is configured
+        if not groq_key:
+            groq_key = st.text_input(
+                "Groq API key",
+                type="password",
+                help="Enter your Groq API key or configure it in Streamlit Cloud Secrets.",
+            )
+
+    # ---------- Ollama Settings ----------
     else:
-        model = st.text_input("Ollama model", value="llama3.2")
+        model = st.text_input(
+            "Ollama model",
+            value="llama3.2"
+        )
         groq_key = ""
-        st.caption("Make sure Ollama is running and the model is pulled: `ollama pull llama3.2`")
 
-    st.divider()
-    chunk_size = st.slider("Chunk size", 200, 2000, 800, step=100)
-    chunk_overlap = st.slider("Chunk overlap", 0, 400, 100, step=50)
-    top_k = st.slider("Chunks to retrieve (top-k)", 1, 10, 4)
+        st.caption(
+            "Ollama must be running and accessible to this app. "
+            "A local Ollama server on your computer is generally not accessible "
+            "from Streamlit Cloud."
+        )
 
+    # ---------- Document Settings ----------
     st.divider()
-    uploaded = st.file_uploader(
-        "Upload documents", type=["pdf", "txt"], accept_multiple_files=True
+
+    chunk_size = st.slider(
+        "Chunk size",
+        min_value=200,
+        max_value=2000,
+        value=800,
+        step=100,
     )
-    if st.button("Build index", type="primary", use_container_width=True):
+
+    chunk_overlap = st.slider(
+        "Chunk overlap",
+        min_value=0,
+        max_value=400,
+        value=100,
+        step=50,
+    )
+
+    top_k = st.slider(
+        "Chunks to retrieve (top-k)",
+        min_value=1,
+        max_value=10,
+        value=4,
+    )
+
+    # ---------- Document Upload ----------
+    st.divider()
+
+    uploaded = st.file_uploader(
+        "Upload documents",
+        type=["pdf", "txt"],
+        accept_multiple_files=True,
+    )
+
+    if st.button(
+        "Build index",
+        type="primary",
+        use_container_width=True,
+    ):
         if not uploaded:
             st.warning("Upload at least one file first.")
         else:
-            with st.spinner("Chunking and embedding..."):
-                store, n_chunks = build_vector_store(uploaded, chunk_size, chunk_overlap)
-            if store is None:
-                st.error("No readable text found (scanned PDFs need OCR).")
-            else:
-                st.session_state.store = store
-                st.session_state.messages = []
-                st.session_state.indexed_info = f"{len(uploaded)} file(s), {n_chunks} chunks"
-                st.success("Index ready.")
+            try:
+                with st.spinner("Chunking and embedding..."):
+                    store, n_chunks = build_vector_store(
+                        uploaded,
+                        chunk_size,
+                        chunk_overlap,
+                    )
 
+                if store is None:
+                    st.error(
+                        "No readable text found. Scanned PDFs may need OCR."
+                    )
+                else:
+                    st.session_state.store = store
+                    st.session_state.messages = []
+                    st.session_state.indexed_info = (
+                        f"{len(uploaded)} file(s), {n_chunks} chunks"
+                    )
+                    st.success("Index ready!")
+
+            except Exception as e:
+                st.error(f"Indexing failed: {e}")
+
+    # Show index information
     if st.session_state.indexed_info:
         st.caption(f"Indexed: {st.session_state.indexed_info}")
 
+    # Clear chat history
     if st.button("Clear chat", use_container_width=True):
         st.session_state.messages = []
+
 
 # ---------- Main ----------
 st.title("📄 RAG Document Q&A")
